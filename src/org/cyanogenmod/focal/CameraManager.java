@@ -76,7 +76,6 @@ public class CameraManager {
     private AutoFocusMoveCallback mAutoFocusMoveCallback;
     private Camera.Parameters mParameters;
     private int mOrientation;
-    private int mVideoRotation;
     private MediaRecorder mMediaRecorder;
     private PreviewPauseListener mPreviewPauseListener;
     private CameraReadyListener mCameraReadyListener;
@@ -168,6 +167,8 @@ public class CameraManager {
     final Object mParametersSync = new Object();
 
     public CameraManager(CameraActivity context) {
+        // set correct initial value
+        mOrientation = 90;
         mPreview = new CameraPreview();
         mMediaRecorder = new MediaRecorder();
         mCameraReady = true;
@@ -392,11 +393,11 @@ public class CameraManager {
         // TODO: maybe need to set picture-size here too for
         // video snapshots
         
-        List<Camera.Size> sizes = params.getSupportedPreviewSizes();
+        //List<Camera.Size> sizes = params.getSupportedPreviewSizes();
         // TODO: support of preferred preview size
         // this is currently breaking camera if preview
         // size != video-size
-        Camera.Size preferred = params.getPreferredPreviewSizeForVideo();
+        /*Camera.Size preferred = params.getPreferredPreviewSizeForVideo();
         if (preferred == null) {
             preferred = sizes.get(0);
         }
@@ -413,7 +414,8 @@ public class CameraManager {
         
         Camera.Size optimalPreview = Util.getOptimalPreviewSize(mContext, sizes,
                         (double) width / height);
-        setPreviewSize(optimalPreview.width, optimalPreview.height);
+        setPreviewSize(optimalPreview.width, optimalPreview.height);*/
+        setPreviewSize(width, height);
     }
     
     public void setPreviewSize(int width, int height) {
@@ -596,7 +598,7 @@ public class CameraManager {
         String[] splat = sz.split("x");
         int width = Integer.parseInt(splat[0]);
         int height = Integer.parseInt(splat[1]);
-
+        
         Log.d(TAG, "setPictureSize " + width + "x" + height);
         Camera.Parameters params = getParameters();
         params.setPictureSize(width, height);
@@ -618,6 +620,8 @@ public class CameraManager {
     public void takeSnapshot(final Camera.ShutterCallback shutterCallback,
                              final Camera.PictureCallback raw, final Camera.PictureCallback jpeg) {
         Log.v(TAG, "takePicture");
+
+        
         if (Util.deviceNeedsStopPreviewToShoot()) {
             safeStopPreview();
         }
@@ -628,6 +632,9 @@ public class CameraManager {
             new Thread() {
                 public void run() {
                     try {
+                        mParameters.setRotation(getJpegRotation());
+                        mCamera.setParameters(mParameters);
+
                         mCamera.takePicture(shutterCallback, raw, jpeg);
                     } catch (RuntimeException e) {
                         Log.e(TAG, "Unable to take picture", e);
@@ -661,7 +668,9 @@ public class CameraManager {
                 - Storage.LOW_STORAGE_THRESHOLD;
         mMediaRecorder.setMaxFileSize(maxFileSize);
         mMediaRecorder.setMaxDuration(0); // infinite
-        mMediaRecorder.setOrientationHint(mVideoRotation);
+        
+        int videoOrientation = getJpegRotation();
+        mMediaRecorder.setOrientationHint(videoOrientation);
 
         try {
             mMediaRecorder.prepare();
@@ -704,6 +713,11 @@ public class CameraManager {
         return mOrientation;
     }
 
+    public int getJpegRotation() {
+        // the jpeg and video rotation hint must be
+        // calculated from the unchanged orientation (-90)
+        return Util.getJpegRotation(mCurrentFacing, mOrientation - 90);
+    }
     /**
      * Sets the current orientation of the device
      * @param orientation The orientation, in degrees
@@ -712,25 +726,10 @@ public class CameraManager {
         orientation += 90;
         if (mOrientation == orientation) return;
 
-        mOrientation = orientation;
-
-        // Rotate the pictures accordingly (display is kept at 90 degrees)
-        Camera.CameraInfo info =
-                new android.hardware.Camera.CameraInfo();
-        Camera.getCameraInfo(mCurrentFacing, info);
-        //orientation = (360 - orientation + 45) / 90 * 90;
-        
-        // mVideoRotation is needed for MediaRecorder!
-        // we dont want the +90 for that
-        if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
-            mVideoRotation = (info.orientation - (mOrientation - 90) + 360) % 360;
-        } else {  // back-facing camera
-            mVideoRotation = (info.orientation + (mOrientation - 90)) % 360;
-        }
-        Log.d(TAG, "mVideoRotation = " + mVideoRotation);
-        //setParameterAsync("rotation", Integer.toString(rotation));
+        Log.d(TAG, "setOrientation = " + orientation);
+        mOrientation = orientation;        
     }
-
+    
     public void restartPreviewIfNeeded() {
         new Thread() {
             public void run() {
@@ -1085,7 +1084,8 @@ public class CameraManager {
         }
 
         public void notifyPreviewSize(int width, int height) {
-            mLastFrameBytes = new byte[2048000];
+            //mLastFrameBytes = new byte[2048000];
+            mLastFrameBytes = new byte[(int) (width * height * 1.5 + 0.5)]; 
 
             // Update preview aspect ratio
             mRenderer.updateRatio(width, height);
@@ -1307,9 +1307,10 @@ public class CameraManager {
 
                 if (mUpdateRatioTo > 0) {
                     Log.d(TAG, "onDrawFrame " + " mRatio="+mRatio);
-                    int deltaWidth = (int) Math.abs(mWidth - mWidth * mRatio);
+                    GLES20.glViewport(0, 0, (int) (mWidth * mRatio), mHeight); 
+                    /*int deltaWidth = (int) Math.abs(mWidth - mWidth * mRatio);
                     GLES20.glViewport(-deltaWidth / 2, 0,
-                            (int) (mWidth * mRatio + deltaWidth / 2.0f), mHeight);
+                            (int) (mWidth * mRatio + deltaWidth / 2.0f), mHeight);*/
                     mUpdateRatioTo = -1;
                 }
 

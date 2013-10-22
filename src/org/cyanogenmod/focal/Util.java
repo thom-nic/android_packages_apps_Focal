@@ -359,6 +359,24 @@ public class Util {
         return Bitmap.createBitmap(rgb, width, height, Bitmap.Config.ARGB_8888);
     }
 
+    public static int getJpegRotation(int cameraId, int orientation) {
+        // See android.hardware.Camera.Parameters.setRotation for
+        // documentation.
+        int rotation = 0;
+        if (orientation != OrientationEventListener.ORIENTATION_UNKNOWN) {
+            android.hardware.Camera.CameraInfo info =
+                    new android.hardware.Camera.CameraInfo();
+            android.hardware.Camera.getCameraInfo(cameraId, info);
+
+            if (info.facing == android.hardware.Camera.CameraInfo.CAMERA_FACING_FRONT) {
+                rotation = (info.orientation - orientation + 360) % 360;
+            } else {  // back-facing camera
+                rotation = (info.orientation + orientation) % 360;
+            }
+        }
+        return rotation;
+    }
+    
     public static String createJpegName(long dateTaken) {
         return "IMG_" + mJpegDateFormat.format(new Date(dateTaken));
     }
