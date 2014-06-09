@@ -24,6 +24,7 @@ import android.net.Uri;
 import android.util.Log;
 
 import org.cyanogenmod.focal.SnapshotManager;
+import org.cyanogenmod.focal.Util;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -41,7 +42,6 @@ public class SoftwareHdrProcessor {
     private File mTempPath;
     private List<Uri> mPictures;
     private SnapshotManager mSnapManager;
-    private Uri mOutputUri;
     private String mOutputTitle;
     private Context mContext;
     private BufferedReader mProcStdOut;
@@ -130,10 +130,9 @@ public class SoftwareHdrProcessor {
                 f.close();
             }
 
-            mSnapManager.prepareNamerUri(100,100);
-            mOutputUri = mSnapManager.getNamerUri();
-            mOutputTitle = mSnapManager.getNamerTitle();
-            mSnapManager.saveImage(mOutputUri, mOutputTitle, 100, 100, orientation, jpegData);
+            long date = System.currentTimeMillis();
+            mOutputTitle = Util.createJpegName(date);
+            mSnapManager.saveImage(mOutputTitle, date, 100, 100, orientation, jpegData);
         } catch (IOException ex) {
             Log.e(TAG, "Unable to process: ", ex);
             return false;

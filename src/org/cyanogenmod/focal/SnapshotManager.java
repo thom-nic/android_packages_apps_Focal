@@ -29,7 +29,6 @@ import android.graphics.BitmapFactory;
 import android.hardware.Camera;
 import android.location.Location;
 import android.media.CamcorderProfile;
-import android.media.ExifInterface;
 import android.media.MediaRecorder;
 import android.net.Uri;
 import android.os.Handler;
@@ -47,6 +46,7 @@ import com.drew.metadata.Tag;
 import org.cyanogenmod.focal.feats.AutoPictureEnhancer;
 import org.cyanogenmod.focal.feats.PixelBuffer;
 import org.cyanogenmod.focal.widgets.SimpleToggleWidget;
+import org.cyanogenmod.focal.exif.ExifInterface;
 
 import java.io.BufferedInputStream;
 import java.io.ByteArrayInputStream;
@@ -152,7 +152,6 @@ public class SnapshotManager {
     private Handler mHandler;
     private ContentResolver mContentResolver;
     private ImageSaver mImageSaver;
-    private ImageNamer mImageNamer;
     private PixelBuffer mOffscreenGL;
     private AutoPictureEnhancer mAutoPicEnhancer;
     private boolean mImageIsProcessing;
@@ -180,9 +179,6 @@ public class SnapshotManager {
         public void onShutter() {
             Log.v(TAG, "onShutter");
 
-            Camera.Size s = mCameraManager.getParameters().getPictureSize();
-            mImageNamer.prepareUri(mContentResolver, System.currentTimeMillis(), s.width, s.height, 0);
-
             // On shutter confirmed, play a small flashing animation
             final SnapshotInfo snap = mSnapshotsQueue.get(mCurrentShutterQueueIndex);
 
@@ -205,12 +201,26 @@ public class SnapshotManager {
             Log.v(TAG, "onPicture: Got JPEG data");
             mCameraManager.restartPreviewIfNeeded();
 
+            final long date = System.currentTimeMillis();
+            final String title = Util.createJpegName(date);
+            
             // Calculate the width and the height of the jpeg.
+            int jpegRotation = mCameraManager.getJpegRotation();
             final Camera.Size s = mCameraManager.getParameters().getPictureSize();
+
+            ExifInterface exif = Exif.getExif(jpegData);
             int orientation = CameraActivity.getCameraMode() == CameraActivity.CAMERA_MODE_PANO ? 0 :
-                    mCameraManager.getOrientation();
-            final int width = s.width,
-                    height = s.height;
+                    Exif.getOrientation(exif);
+
+            Log.d(TAG, "jpegRotation = " + jpegRotation + " exif rotation = " + Exif.getOrientation(exif));
+            final int width, height;
+            if ((jpegRotation + orientation) % 180 == 0) {
+                width = s.width;
+                height = s.height;
+            } else {
+                width = s.height;
+                height = s.width;
+            }
 
             if (mSnapshotsQueue.size() == 0) {
                 Log.e(TAG, "DERP! Why is snapshotqueue empty? Two JPEG callbacks!?");
@@ -231,9 +241,6 @@ public class SnapshotManager {
 
             // Store the jpeg on internal memory if needed
             if (snap.mSave) {
-                final Uri uri = mImageNamer.getUri();
-                final String title = mImageNamer.getTitle();
-                snap.mUri = uri;
 
                 // If the orientation is somehow negative, avoid the Gallery crashing dumbly
                 // (see com/android/gallery3d/ui/PhotoView.java line 758 (setTileViewPosition))
@@ -283,7 +290,7 @@ public class SnapshotManager {
                                 mOffscreenGL.getBitmap().compress(Bitmap.CompressFormat.JPEG, 90, baos);
 
                                 if (mImageSaver != null) {
-                                    mImageSaver.addImage(baos.toByteArray(), uri, title, null,
+                                    mImageSaver.addImage(baos.toByteArray(), title, date, null,
                                             width, height, correctedOrientation, tagsList, snap);
                                 } else {
                                     Log.e(TAG, "ImageSaver was null: couldn't save image!");
@@ -301,7 +308,7 @@ public class SnapshotManager {
                                 // The rendering failed, the device might not be compatible for
                                 // whatever reason. We just save the original file.
                                 if (mImageSaver != null) {
-                                    mImageSaver.addImage(finalData, uri, title, null,
+                                    mImageSaver.addImage(finalData, title, date, null,
                                             width, height, correctedOrientation, snap);
                                 }
 
@@ -311,7 +318,7 @@ public class SnapshotManager {
                                 // The rendering failed, the device might not be compatible for
                                 // whatever reason. We just save the original file.
                                 if (mImageSaver != null) {
-                                    mImageSaver.addImage(finalData, uri, title, null,
+                                    mImageSaver.addImage(finalData, title, date, null,
                                             width, height, correctedOrientation, snap);
                                 }
 
@@ -321,7 +328,7 @@ public class SnapshotManager {
                     }.start();
                 } else {
                     // Just save it as is
-                    mImageSaver.addImage(finalData, uri, title, null,
+                    mImageSaver.addImage(finalData, title, date, null,
                             width, height, correctedOrientation, snap);
                 }
             }
@@ -355,9 +362,9 @@ public class SnapshotManager {
     private Runnable mPreviewCaptureRunnable = new Runnable() {
         @Override
         public void run() {
+            long date = System.currentTimeMillis();
+            String title = Util.createJpegName(date);
             Camera.Size s = mCameraManager.getParameters().getPreviewSize();
-            mImageNamer.prepareUri(mContentResolver, System.currentTimeMillis(),
-                    s.width, s.height, 0);
 
             SnapshotInfo info = new SnapshotInfo();
             info.mSave = true;
@@ -372,17 +379,19 @@ public class SnapshotManager {
             info.mThumbnail.compress(Bitmap.CompressFormat.JPEG, 80, baos);
             byte[] jpegData = baos.toByteArray();
 
-            // Calculate the width and the height of the jpeg.
-            int orientation = Exif.getOrientation(jpegData) - mCameraManager.getOrientation();
-            int width, height;
-            width = s.width;
-            height = s.height;
+            int jpegRotation = mCameraManager.getJpegRotation();
+            ExifInterface exif = Exif.getExif(jpegData);
+            int orientation = Exif.getOrientation(exif);
+            final int width, height;
+            if ((jpegRotation + orientation) % 180 == 0) {
+                width = s.width;
+                height = s.height;
+            } else {
+                width = s.height;
+                height = s.width;
+            }
 
-            Uri uri = mImageNamer.getUri();
-            String title = mImageNamer.getTitle();
-            info.mUri = uri;
-
-            mImageSaver.addImage(jpegData, uri, title, null,
+            mImageSaver.addImage(jpegData, title, date, null,
                     width, height, orientation);
 
             for (SnapshotListener listener : mListeners) {
@@ -399,7 +408,6 @@ public class SnapshotManager {
         mListeners = new ArrayList<SnapshotListener>();
         mHandler = new Handler();
         mImageSaver = new ImageSaver();
-        mImageNamer = new ImageNamer();
         mVideoNamer = new VideoNamer();
         mContentResolver = ctx.getContentResolver();
         mProfile = CamcorderProfile.get(CamcorderProfile.QUALITY_HIGH);
@@ -434,42 +442,14 @@ public class SnapshotManager {
         return mDoAutoEnhance;
     }
 
-    public void prepareNamerUri(int width, int height) {
-        if (mImageNamer == null) {
-            // ImageNamer can be dead if the user exitted the app.
-            // We restart it temporarily.
-            mImageNamer = new ImageNamer();
-        }
-        mImageNamer.prepareUri(mContentResolver,
-                System.currentTimeMillis(), width, height, 0);
-    }
-
-    public Uri getNamerUri() {
-        if (mImageNamer == null) {
-            // ImageNamer can be dead if the user exitted the app.
-            // We restart it temporarily.
-            mImageNamer = new ImageNamer();
-        }
-        return mImageNamer.getUri();
-    }
-
-    public String getNamerTitle() {
-        if (mImageNamer == null) {
-            // ImageNamer can be dead if the user exitted the app.
-            // We restart it temporarily.
-            mImageNamer = new ImageNamer();
-        }
-        return mImageNamer.getTitle();
-    }
-
-    public void saveImage(Uri uri, String title, int width, int height,
+    public void saveImage(String title, long date, int width, int height,
                           int orientation, byte[] jpegData) {
         if (mImageSaver == null) {
             // ImageSaver can be dead if the user exitted the app.
             // We restart it temporarily.
             mImageSaver = new ImageSaver();
         }
-        mImageSaver.addImage(jpegData, uri, title, null,
+        mImageSaver.addImage(jpegData, title, date, null,
                 width, height, orientation);
         mImageSaver.waitDone();
         mImageSaver.finish();
@@ -525,10 +505,6 @@ public class SnapshotManager {
             mCurrentShutterQueueIndex = 0;
             new Thread(mCaptureRunnable).start();
         }
-    }
-
-    public ImageNamer getImageNamer() {
-        return mImageNamer;
     }
 
     public ImageSaver getImageSaver() {
@@ -711,10 +687,8 @@ public class SnapshotManager {
             // We wait until the last processing image was saved
             mImageSaver.finish();
         }
-        mImageNamer.finish();
         mVideoNamer.finish();
         mImageSaver = null;
-        mImageNamer = null;
         mVideoNamer = null;
     }
 
@@ -726,10 +700,6 @@ public class SnapshotManager {
             mImageSaver = new ImageSaver();
         }
 
-        if (mImageNamer == null) {
-            mImageNamer = new ImageNamer();
-        }
-
         if (mVideoNamer == null) {
             mVideoNamer = new VideoNamer();
         }
@@ -738,8 +708,8 @@ public class SnapshotManager {
     // Each SaveRequest remembers the data needed to save an image.
     private static class SaveRequest {
         byte[] data;
-        Uri uri;
         String title;
+        long date;
         Location loc;
         int width, height;
         int orientation;
@@ -775,24 +745,26 @@ public class SnapshotManager {
         }
 
         // Runs in main thread
-        public void addImage(final byte[] data, Uri uri, String title,
+        public void addImage(final byte[] data, String title, long date, 
                              Location loc, int width, int height, int orientation, SnapshotInfo snap) {
-            addImage(data, uri, title, loc, width, height, orientation, null, snap);
+            addImage(data, title, date, loc, width, height, orientation, null, snap);
         }
 
         // Runs in main thread
-        public void addImage(final byte[] data, Uri uri, String title,
+        public void addImage(final byte[] data, String title, long date,
                              Location loc, int width, int height, int orientation) {
-           addImage(data, uri, title, loc, width, height, orientation, null, null);
+           addImage(data, title, date, loc, width, height, orientation, null, null);
         }
 
         // Runs in main thread
-        public void addImage(final byte[] data, Uri uri, String title,
+        public void addImage(final byte[] data, String title, long date, 
                              Location loc, int width, int height, int orientation,
                              List<Tag> exifTags, SnapshotInfo snap) {
+
+            Log.d(TAG, "width = " + width + " height = " + height + " orientation = " + orientation);
             SaveRequest r = new SaveRequest();
             r.data = data;
-            r.uri = uri;
+            r.date = date;
             r.title = title;
             r.loc = (loc == null) ? null : new Location(loc);  // make a copy
             r.width = width;
@@ -838,7 +810,7 @@ public class SnapshotManager {
                         listener.onMediaSavingStart();
                     }
                 }
-                storeImage(r.data, r.uri, r.title, r.loc, r.width, r.height,
+                storeImage(r.data, r.title, r.date, r.loc, r.width, r.height,
                         r.orientation, r.exifTags, r.snap);
                 synchronized (this) {
                     mQueue.remove(0);
@@ -878,137 +850,54 @@ public class SnapshotManager {
         }
 
         // Runs in saver thread
-        private void storeImage(final byte[] data, Uri uri, String title,
+        private void storeImage(final byte[] data, String title, long date,
                                 Location loc, int width, int height, int orientation,
                                 List<Tag> exifTags, SnapshotInfo snap) {
-            boolean ok = Storage.getStorage().updateImage(mContentResolver, uri, title, loc,
+            Log.d(TAG, "width = " + width + " height = " + height);
+            Uri uri = Storage.getStorage().addImage(mContentResolver, title, date, loc,
                     orientation, data, width, height);
 
-            if (ok) {
-                if (exifTags != null && exifTags.size() > 0) {
-                    // Write exif tags to final picture
-                    try {
-                        ExifInterface exifIf = new ExifInterface(Util.getRealPathFromURI(mContext, uri));
-
-                        for (Tag tag : exifTags) {
-                            // move along
-                            String[] hack = tag.toString().split("\\]");
-                            hack = hack[1].split("-");
-                            exifIf.setAttribute(tag.getTagName(), hack[1].trim());
-                        }
-
-                        exifIf.saveAttributes();
-                    } catch (IOException e) {
-                        Log.e(TAG, "Couldn't write exif", e);
-                    } catch (CursorIndexOutOfBoundsException e) {
-                        Log.e(TAG, "Couldn't find original picture", e);
-                    }
-                }
-
-                Util.broadcastNewPicture(mContext, uri);
-            }
-
-            if (snap != null) {
-                for (SnapshotListener listener : mListeners) {
-                    listener.onSnapshotSaved(snap);
-                }
-            }
-        }
-    }
-
-    private static class ImageNamer extends Thread {
-        private boolean mRequestPending;
-        private ContentResolver mResolver;
-        private long mDateTaken;
-        private int mWidth, mHeight;
-        private boolean mStop;
-        private Uri mUri;
-        private String mTitle;
-
-        // Runs in main thread
-        public ImageNamer() {
-            start();
-        }
-
-        // Runs in main thread
-        public synchronized void prepareUri(ContentResolver resolver,
-                long dateTaken, int width, int height, int rotation) {
-            if (rotation % 180 != 0) {
-                int tmp = width;
-                width = height;
-                height = tmp;
-            }
-            mRequestPending = true;
-            mResolver = resolver;
-            mDateTaken = dateTaken;
-            mWidth = width;
-            mHeight = height;
-            notifyAll();
-        }
-
-        // Runs in main thread
-        public synchronized Uri getUri() {
-            // wait until the request is done.
-            while (mRequestPending) {
+            if (uri != null) {
+                snap.mUri = uri;
+                /*String path = Util.getRealPathFromURI(mContext, uri);
+                Log.d(TAG, "storeImage=" + title + " path=" + path);
                 try {
-                    wait();
-                } catch (InterruptedException ex) {
-                    // Do nothing here
-                }
-            }
+                    ExifInterface exifIf = Exif.getExif(data);
 
-            // Return the uri generated
-            Uri uri = mUri;
-            mUri = null;
-            return uri;
-        }
+                    if (exifTags != null && exifTags.size() > 0) {
+                        Log.e(TAG, "exifTage=" + exifTags.toString());
+                        // Write exif tags to final picture
+                        try {
+                            ExifInterface exifIf = new ExifInterface(path);
 
-        // Runs in main thread, should be called after getUri().
-        public synchronized String getTitle() {
-            return mTitle;
-        }
+                            for (Tag tag : exifTags) {
+                                // move along
+                                String[] hack = tag.toString().split("\\]");
+                                hack = hack[1].split("-");
+                                exifIf.setAttribute(tag.getTagName(), hack[1].trim());
+                            }
 
-        // Runs in namer thread
-        @Override
-        public synchronized void run() {
-            while (true) {
-                if (mStop) break;
-                if (!mRequestPending) {
-                    try {
-                        wait();
-                    } catch (InterruptedException ex) {
-                        // ignore.
+                            exifIf.saveAttributes();
+                        } catch (IOException e) {
+                            Log.e(TAG, "Couldn't write exif", e);
+                        } catch (CursorIndexOutOfBoundsException e) {
+                            Log.e(TAG, "Couldn't find original picture", e);
+                        }
                     }
-                    continue;
+                    exifIf.writeExif(data, path);
+                } catch (IOException e) {
+                   Log.e(TAG, "Couldn't write exif", e);
+                }*/
+                Util.broadcastNewPicture(mContext, uri);
+
+                if (snap != null) {
+                    for (SnapshotListener listener : mListeners) {
+                        listener.onSnapshotSaved(snap);
+                    }
                 }
-                cleanOldUri();
-                generateUri();
-                mRequestPending = false;
-                notifyAll();
             }
-            cleanOldUri();
-        }
-
-        // Runs in main thread
-        public synchronized void finish() {
-            mStop = true;
-            notifyAll();
-        }
-
-        // Runs in namer thread
-        private void generateUri() {
-            mTitle = Util.createJpegName(mDateTaken);
-            mUri = Storage.getStorage().newImage(mResolver, mTitle, mDateTaken, mWidth, mHeight);
-        }
-
-        // Runs in namer thread
-        private void cleanOldUri() {
-            if (mUri == null) return;
-            Storage.getStorage().deleteImage(mResolver, mUri);
-            mUri = null;
         }
     }
-
 
     private static class VideoNamer extends Thread {
         private boolean mRequestPending;

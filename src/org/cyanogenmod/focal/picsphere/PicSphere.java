@@ -53,7 +53,6 @@ public class PicSphere {
     private File mTempPath;
     private String mProjectFile;
     private SnapshotManager mSnapManager;
-    private Uri mOutputUri;
     private String mOutputTitle;
     private List<ProgressListener> mProgressListeners;
     private int mRenderProgress = 0;
@@ -555,12 +554,11 @@ public class PicSphere {
         }
 
         if (opts.outWidth > 0 && opts.outHeight > 0) {
-            mSnapManager.prepareNamerUri(opts.outWidth, opts.outHeight);
-            mOutputUri = mSnapManager.getNamerUri();
-            mOutputTitle = mSnapManager.getNamerTitle();
+            long date = System.currentTimeMillis();
+            mOutputTitle = Util.createJpegName(date);
 
             Log.i(TAG, "PicSphere size: " + opts.outWidth + "x" + opts.outHeight);
-            mSnapManager.saveImage(mOutputUri, mOutputTitle, opts.outWidth, opts.outWidth, 0, jpegData);
+            mSnapManager.saveImage(mOutputTitle, date, opts.outWidth, opts.outWidth, 0, jpegData);
         } else {
             Log.e(TAG, "Invalid output image size: " + opts.outWidth + "x" + opts.outHeight);
             throw new IOException("Invalid output image size: " + opts.outWidth + "x" + opts.outHeight);
